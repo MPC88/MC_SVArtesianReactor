@@ -21,22 +21,23 @@ namespace MC_SVArtesianReactor
         private static float cooldown = 20f;
         private static float energyGen = 442f;
         private static float energyGenMult = 1.2f;
-        private static float hpPercent = 0.1f;
+        private static float hpPercent = 0.01f;
 
         private static int equipID = 45353;
         private static Sprite equipmentIcon;
         private static GameObject audioGO;
-        private static GameObject buffGO = null;
+        private static GameObject buffGO;
+        private static BuffMCArtesianReactor buffArtesianReactor = null;
 
         public void Awake()
         {
             Harmony.CreateAndPatchAll(typeof(Main));
 
             string pluginfolder = System.IO.Path.GetDirectoryName(GetType().Assembly.Location);
-            string bundleName = "artesian battlecruiser";
-            AssetBundle assets = AssetBundle.LoadFromFile($"{pluginfolder}\\Ships Data\\{bundleName}");
-            equipmentIcon = assets.LoadAsset<Sprite>("Assets/ArtesianExperimentalReactor.png");
-            audioGO = assets.LoadAsset<GameObject>("Assets/ArtesianExperimentalReactorAudio.prefab");
+            string bundleName = "mc_artesianreactor";
+            AssetBundle assets = AssetBundle.LoadFromFile($"{pluginfolder}\\{bundleName}");
+            equipmentIcon = assets.LoadAsset<Sprite>("Assets/_MyStuff/ArtesianReactor/ArtesianExperimentalReactorIcon.png");
+            audioGO = assets.LoadAsset<GameObject>("Assets/_MyStuff/ArtesianReactor/ArtesianReactor.prefab");            
         }
 
         [HarmonyPatch(typeof(DemoControl), "SpawnMainMenuBackground")]
@@ -88,20 +89,20 @@ namespace MC_SVArtesianReactor
             equipment.equipName = equipmentName;
             equipment.description = description;
             equipment.craftingMaterials = null;
-            if (buffGO == null)
-                MakeBuffGO(equipment);
-            equipment.buff = buffGO;
+            equipment.buff = null;
 
             return equipment;
         }
 
         private static void MakeBuffGO(Equipment equip)
         {
+            Debug.Log("Make");
             buffGO = new GameObject { name = "ArtesianReactor" };
             buffGO.AddComponent<BuffControl>();
             buffGO.GetComponent<BuffControl>().owner = null;
             buffGO.GetComponent<BuffControl>().activeEquipment = MakeActiveEquip(
                 equip, null, equip.defaultKey, 1, 0);
+            buffArtesianReactor = buffGO.AddComponent<BuffMCArtesianReactor>();
         }
 
         private static AE_MCArtesianReactor MakeActiveEquip(Equipment equipment, SpaceShip ss, KeyCode key, int rarity, int qnt)
@@ -120,17 +121,17 @@ namespace MC_SVArtesianReactor
             return activeEquip;
         }
 
-        [HarmonyPatch(typeof(ActiveEquipment), "ActivateDeactivate")]
+        [HarmonyPatch(typeof(AE_BuffBased), "ActivateDeactivate")]
         [HarmonyPrefix]
         internal static void ActivateDeactivate_Pre(ActiveEquipment __instance)
         {
-            if (__instance != null || __instance.equipment != null ||
+            if (__instance == null || __instance.equipment == null ||
                 __instance.equipment.id != equipID)
                 return;
 
             if (buffGO == null)
                 MakeBuffGO(__instance.equipment);
-            buffGO.GetComponent<BuffControl>().activeEquipment = __instance;
+
             __instance.equipment.buff = buffGO;
         }
 
@@ -160,6 +161,44 @@ namespace MC_SVArtesianReactor
             __result = __result.Replace("<LEVEL>", rarity.ToString());
         }
 
+        public class BuffMCArtesianReactor : BuffBase
+        {
+            public int affectedSystems = 0;
+            private float cnt;
+
+            protected override void Setup()
+            {                
+                this.targetSS = this.buffControl.owner;
+                base.Setup();
+            }
+
+            protected override void Begin()
+            {
+                base.Begin();
+                cnt = 0;
+            }
+
+            protected override void End()
+            {
+                base.End();
+            }
+
+            private void Update()
+            {
+                cnt += Time.deltaTime;
+
+                if (cnt >= 1)
+                {
+                    targetSS.currHP -= targetSS.baseHP * hpPercent * affectedSystems;
+                    if(targetSS.currHP < 0)
+                    {
+                        targetSS.Die();
+                    }
+                    cnt = 0;
+                }
+            }
+        }
+
         public class AE_MCArtesianReactor : AE_BuffBased
         {
             protected override bool showBuffIcon
@@ -170,8 +209,7 @@ namespace MC_SVArtesianReactor
                 }
             }
 
-            private readonly List<int> affectedSystems = new List<int>();
-            private float cnt;
+            private readonly List<int> affectedSystems = new List<int>();            
 
             public AE_MCArtesianReactor()
             {
@@ -184,19 +222,13 @@ namespace MC_SVArtesianReactor
             public override void ActivateDeactivate(bool shiftPressed, Transform target)
             {
                 this.startEnergyCost = this.equipment.energyCost;
-
-                if (this.active)
-                    base.ActivateDeactivate(shiftPressed, target);
-
+                target = this.ss.transform;
                 base.ActivateDeactivate(shiftPressed, target);
             }
 
             public override void AfterActivate()
             {
-                base.AfterActivate();
-
                 this.affectedSystems.Clear();
-                this.cnt = 0;
 
                 for (int system = 0; system < this.ss.energyMmt.level.Length; system++)
                 {
@@ -209,30 +241,52 @@ namespace MC_SVArtesianReactor
                     }
                 }
 
+                if (buffArtesianReactor != null)
+                    buffArtesianReactor.affectedSystems = this.affectedSystems.Count;
+
+                ApplyEnergyLevels();
+
                 GameObject audio = GameObject.Instantiate(audioGO, ss.transform.position, ss.transform.rotation);
                 audio.GetComponent<AudioSource>().volume = SoundSys.SFXvolume;
+
+                base.AfterActivate();
             }
 
             public override void AfterDeactivate()
             {
-                base.AfterDeactivate();
-
                 this.affectedSystems.ForEach(sys => {
                     this.ss.energyMmt.level[sys] -= this.rarity;
                     if (this.ss.energyMmt.level[sys] < -3)
                         this.ss.energyMmt.level[sys] = -3;
                 });
+
+                ApplyEnergyLevels();
+
+                base.AfterDeactivate();
             }
 
-            public void Update()
+            private void ApplyEnergyLevels()
             {
-                cnt += Time.deltaTime;
-
-                if (cnt >= 1)
+                ss.transform.Find("Weapons").GetComponent<AudioSource>().pitch = 1f + (float)ss.energyMmt.level[0] * 0.02f;
+                if (ss.energyMmt.level[0] == -3)
                 {
-                    ss.currHP -= ss.baseHP * hpPercent * affectedSystems.Count;
-                    cnt = 0;
+                    PlayerControl.inst.OrderHoldFire(mercenariesToo: false, permanent: false);
                 }
+
+                if (ss.stats.currShield > ss.stats.baseShield * ss.energyMmt.valueMod(1))
+                {
+                    ss.stats.currShield = ss.stats.baseShield * ss.energyMmt.valueMod(1);
+                }
+                if (ss.stats.baseShield <= 0f)
+                {
+                    ss.energyMmt.level[1] = -3;
+                }
+                ss.SetThrusters(0);
+                PlayerUIControl.inst.UpdateEnergyPanel();
+                PlayerUIControl.inst.UpdateUI();
+                ss.CallUpdateBar();
+                GameObject.FindGameObjectWithTag("MainCanvas").transform.Find("Inventory").GetComponent<ShipInfo>().ShowShipInfo(forced: false);
+                ss.shipData.energyLevels = ss.energyMmt.level;
             }
         }
     }
