@@ -97,7 +97,7 @@ namespace MC_SVArtesianReactor
 
         private static void MakeBuffGO(Equipment equip)
         {
-            buffGO = new GameObject { name = "NukeTransporter" };
+            buffGO = new GameObject { name = "ArtesianReactor" };
             buffGO.AddComponent<BuffControl>();
             buffGO.GetComponent<BuffControl>().owner = null;
             buffGO.GetComponent<BuffControl>().activeEquipment = MakeActiveEquip(
