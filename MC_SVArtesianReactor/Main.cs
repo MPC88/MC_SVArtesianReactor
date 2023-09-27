@@ -32,6 +32,7 @@ namespace MC_SVArtesianReactor
         public void Awake()
         {
             Harmony.CreateAndPatchAll(typeof(Main));
+            Harmony.CreateAndPatchAll(typeof(AE_MCArtesianReactor));
 
             string pluginfolder = System.IO.Path.GetDirectoryName(GetType().Assembly.Location);
             string bundleName = "mc_artesianreactor";
@@ -69,10 +70,10 @@ namespace MC_SVArtesianReactor
             equipment.energyCost = energyCost;
             equipment.energyCostPerShipClass = false;
             equipment.rarityCostMod = rarityCostMod;
-            equipment.techLevel = 40;
+            equipment.techLevel = 0;
             equipment.sortPower = 2;
             equipment.massChange = 0;
-            equipment.type = EquipmentType.Device;
+            equipment.type = EquipmentType.Generator;
             equipment.effects = new List<Effect>() { new Effect() { type = 0, description = "", mod = 1f, value = energyGen, uniqueLevel = 0 } };
             equipment.uniqueReplacement = false;
             equipment.rarityMod = energyGenMult;
@@ -115,9 +116,9 @@ namespace MC_SVArtesianReactor
                 ss = ss,
                 isPlayer = (ss != null && ss.CompareTag("Player")),
                 equipment = equipment,
-                qnt = qnt
+                qnt = qnt,
+                active = false
             };
-            activeEquip.active = false;
             return activeEquip;
         }
 
@@ -287,6 +288,47 @@ namespace MC_SVArtesianReactor
                 ss.CallUpdateBar();
                 GameObject.FindGameObjectWithTag("MainCanvas").transform.Find("Inventory").GetComponent<ShipInfo>().ShowShipInfo(forced: false);
                 ss.shipData.energyLevels = ss.energyMmt.level;
+            }
+
+            [HarmonyPatch(typeof(SpaceShip), nameof(SpaceShip.CalculateEnergy))]
+            [HarmonyPrefix]
+            private static void SpaceShipCalculateEnergy_Pre(SpaceShip __instance, out bool __state)
+            {
+                __state = false;
+                BuiltInEquipmentData bied = null;
+
+                if (__instance == null || __instance.shipData == null || __instance.shipData.builtInData == null)
+                    return;
+
+                __instance.shipData.builtInData.ForEach(x =>
+                {
+                    if (x.equipmentID == equipID)
+                        bied = x;
+                });
+
+                if (bied != null)
+                {
+                    __state = true;
+                    __instance.shipData.equipments.Add(new InstalledEquipment(bied.equipmentID, bied.rarity, 1, bied.key));
+                }
+            }
+
+            [HarmonyPatch(typeof(SpaceShip), nameof(SpaceShip.CalculateEnergy))]
+            [HarmonyPostfix]
+            private static void SpaceShipCalculateEnergy_Post(SpaceShip __instance, bool __state)
+            {
+                if (!__state)
+                    return;
+
+                int index = -1;
+                for (int i = 0; i < __instance.shipData.equipments.Count; i++)
+                    if (__instance.shipData.equipments[i].equipmentID == equipID)
+                        index = i;
+
+                if (index < 0 || index >= __instance.shipData.equipments.Count)
+                    return;
+
+                __instance.shipData.equipments.RemoveAt(index);
             }
         }
     }
