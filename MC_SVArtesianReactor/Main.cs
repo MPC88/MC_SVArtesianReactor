@@ -28,6 +28,7 @@ namespace MC_SVArtesianReactor
         private static GameObject audioGO;
         private static GameObject buffGO;
         private static BuffMCArtesianReactor buffArtesianReactor = null;
+        private static bool loaded = false;
 
         public void Awake()
         {
@@ -45,9 +46,13 @@ namespace MC_SVArtesianReactor
         [HarmonyPostfix]
         private static void DemoControlSpawnMainMenuBackground_Post()
         {
+            if (loaded)
+                return;
+
             List<ShipBonus> sb = new List<ShipBonus>(ShipDB.GetModel(shipID).modelBonus);
             sb.Add(new SB_BuiltInEquipment() { equipmentID = equipID });
             ShipDB.GetModel(shipID).modelBonus = sb.ToArray();
+            loaded = true;
         }
 
         [HarmonyPatch(typeof(EquipmentDB), "LoadDatabaseForce")]
